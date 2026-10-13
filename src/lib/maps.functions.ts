@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import type { NavigationStep } from "@/lib/navigation";
 
 const GATEWAY_URL = "https://connector-gateway.lovable.dev/google_maps";
 
@@ -70,17 +71,19 @@ export const planRoute = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const wp = (p: LatLng) => ({ location: { latLng: { latitude: p.lat, longitude: p.lng } } });
     const stops = data.stops;
+      const destination = stops[stops.length - 1];
+      if (!destination) throw new Error("Adicione uma entrega.");
     const res = await fetch(`${GATEWAY_URL}/routes/directions/v2:computeRoutes`, {
       method: "POST",
       headers: {
         ...creds(),
         "Content-Type": "application/json",
         "X-Goog-FieldMask":
-          "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline,routes.optimizedIntermediateWaypointIndex",
+          "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline,routes.optimizedIntermediateWaypointIndex,routes.legs.steps.navigationInstruction,routes.legs.steps.distanceMeters,routes.legs.steps.startLocation,routes.legs.steps.endLocation",
       },
       body: JSON.stringify({
         origin: wp(data.origin),
-        destination: wp(stops[stops.length - 1]!),
+        destination: wp(destination),
         intermediates: stops.slice(0, -1).map(wp),
         travelMode: "TWO_WHEELER",
         optimizeWaypointOrder: stops.length > 2,
@@ -88,10 +91,35 @@ export const planRoute = createServerFn({ method: "POST" })
       }),
     });
     const json = (await check(res)) as {
-      routes?: { distanceMeters?: number; duration?: string; polyline?: { encodedPolyline?: string }; optimizedIntermediateWaypointIndex?: number[] }[];
+      routes?: {
+        distanceMeters?: number; duration?: string; polyline?: { encodedPolyline?: string }; optimizedIntermediateWaypointIndex?: number[];
+        legs?: { steps?: {
+          navigationInstruction?: { instructions?: string; maneuver?: string };
+          distanceMeters?: number;
+          startLocation?: { latLng?: { latitude?: number; longitude?: number } };
+          endLocation?: { latLng?: { latitude?: number; longitude?: number } };
+        }[] }[];
+      }[];
     };
     const r = json.routes?.[0];
     if (!r?.polyline?.encodedPolyline) throw new Error("Nenhuma rota encontrada.");
+    const durationSeconds = Number(r.duration?.replace(/s$/, ""));
+    if (!r.duration || !Number.isFinite(durationSeconds) || durationSeconds < 0) throw new Error("Tempo da rota inválido.");
+    const steps: NavigationStep[] = (r.legs ?? []).flatMap((leg) => (leg.steps ?? []).flatMap((step) => {
+      const start = step.startLocation?.latLng;
+      const end = step.endLocation?.latLng;
+      if (!start || !end || !step.navigationInstruction?.instructions) return [];
+      const startLat = start.latitude ?? 0, startLng = start.longitude ?? 0;
+      const endLat = end.latitude ?? 0, endLng = end.longitude ?? 0;
+      if (![startLat, startLng, endLat, endLng].every(Number.isFinite)) throw new Error("Coordenadas da rota inválidas.");
+      return [{
+        instruction: step.navigationInstruction.instructions,
+        maneuver: step.navigationInstruction.maneuver ?? "STRAIGHT",
+        distanceMeters: step.distanceMeters ?? 0,
+        start: { lat: startLat, lng: startLng },
+        end: { lat: endLat, lng: endLng },
+      }];
+    }));
     const middle = stops.length - 1;
     const order = r.optimizedIntermediateWaypointIndex && r.optimizedIntermediateWaypointIndex.length === middle
       ? [...r.optimizedIntermediateWaypointIndex, middle]
@@ -99,7 +127,8 @@ export const planRoute = createServerFn({ method: "POST" })
     return {
       polyline: r.polyline.encodedPolyline,
       distanceMeters: r.distanceMeters ?? 0,
-      durationSeconds: parseFloat(r.duration ?? "0"),
+      durationSeconds,
+      steps,
       order,
     };
   });

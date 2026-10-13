@@ -11,3 +11,4 @@
 
 - All Google Maps data calls (Places, Routes, Roads snap) go through authenticated server functions in src/lib/maps.functions.ts — keeps the server key private and usage bounded to signed-in users.
 - Recorded GPS trips are snapped to roads with the Roads API before saving to delivery_routes — the saved line must follow real streets.
+- Navigation uses Routes API step instructions and GPS endpoint proximity in src/lib/navigation.ts; keep the planned polyline visible during recording so delivery guidance is not erased on departure.
