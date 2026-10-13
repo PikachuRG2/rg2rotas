@@ -14,7 +14,45 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      delivery_routes: {
+        Row: {
+          created_at: string
+          distance_m: number
+          ended_at: string | null
+          id: string
+          name: string
+          raw_path: Json
+          snapped_path: Json
+          started_at: string | null
+          stops: Json
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          distance_m?: number
+          ended_at?: string | null
+          id?: string
+          name?: string
+          raw_path?: Json
+          snapped_path?: Json
+          started_at?: string | null
+          stops?: Json
+          user_id?: string
+        }
+        Update: {
+          created_at?: string
+          distance_m?: number
+          ended_at?: string | null
+          id?: string
+          name?: string
+          raw_path?: Json
+          snapped_path?: Json
+          started_at?: string | null
+          stops?: Json
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
