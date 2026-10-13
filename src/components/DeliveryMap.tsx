@@ -327,7 +327,7 @@ export function DeliveryMap() {
         <aside aria-label="Próxima direção" aria-live="polite" className="absolute inset-x-3 top-16 z-10 mx-auto flex max-w-xl items-center gap-3 rounded-lg border border-border bg-card/95 p-3 shadow-panel">
           <DirectionIcon className="h-9 w-9 shrink-0 text-primary" />
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-primary">{arrived ? "Destino alcançado" : distanceToTurn !== null ? `Em aproximadamente ${navigationDistance(distanceToTurn)}` : "Saída"}</p>
+            <p className="text-sm font-semibold text-primary">{arrived ? "Destino alcançado" : distanceToTurn !== null ? `${nextStep ? "Em" : "Destino em"} aproximadamente ${navigationDistance(distanceToTurn)}` : "Saída"}</p>
             <p className="text-base font-bold leading-tight">{arrived ? "Fim do caminho planejado" : guidance?.instruction}</p>
           </div>
           <Button variant="secondary" size="icon" aria-label="Centralizar na minha localização" title="Minha localização" onClick={() => { if (me) { map.current?.panTo(me); map.current?.setZoom(18); } }}><Navigation /></Button>
@@ -342,7 +342,7 @@ export function DeliveryMap() {
       )}
 
       {/* Bottom sheet */}
-      <section className="absolute inset-x-0 bottom-0 z-10 mx-auto max-w-xl rounded-t-2xl border-t border-border bg-card/95 shadow-panel backdrop-blur md:bottom-4 md:left-4 md:right-auto md:w-[420px] md:rounded-2xl md:border">
+      <section className="absolute inset-x-0 bottom-0 z-10 mx-auto max-h-[calc(100dvh-12rem)] max-w-xl overflow-y-auto rounded-t-2xl border-t border-border bg-card/95 shadow-panel backdrop-blur md:bottom-4 md:left-4 md:right-auto md:w-[420px] md:rounded-2xl md:border">
         <button onClick={() => setOpen(!open)} className="flex w-full justify-center py-2" aria-label="Abrir painel">
           <span className="h-1.5 w-12 rounded-full bg-muted-foreground/40" />
         </button>
@@ -410,6 +410,7 @@ export function DeliveryMap() {
                     <p className="text-center text-sm text-muted-foreground">
                       Previsto: <b className="text-foreground">{km(plan.distanceMeters)}</b> · {Math.round(plan.durationSeconds / 60)} min
                     </p>
+                    <p className="text-xs text-muted-foreground">Rotas de moto estão em fase de testes no Google; podem não incluir vias adequadas. Respeite a sinalização.</p>
                     {plan.steps.length > 0 && <details className="border-t border-border pt-2">
                       <summary className="cursor-pointer text-sm font-semibold">Conversões · {plan.steps.length}</summary>
                       <ol className="mt-2 max-h-36 space-y-2 overflow-auto">

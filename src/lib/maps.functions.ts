@@ -109,12 +109,15 @@ export const planRoute = createServerFn({ method: "POST" })
       const start = step.startLocation?.latLng;
       const end = step.endLocation?.latLng;
       if (!start || !end || !step.navigationInstruction?.instructions) return [];
+      const startLat = start.latitude ?? 0, startLng = start.longitude ?? 0;
+      const endLat = end.latitude ?? 0, endLng = end.longitude ?? 0;
+      if (![startLat, startLng, endLat, endLng].every(Number.isFinite)) throw new Error("Coordenadas da rota inválidas.");
       return [{
         instruction: step.navigationInstruction.instructions,
         maneuver: step.navigationInstruction.maneuver ?? "STRAIGHT",
         distanceMeters: step.distanceMeters ?? 0,
-        start: { lat: start.latitude ?? 0, lng: start.longitude ?? 0 },
-        end: { lat: end.latitude ?? 0, lng: end.longitude ?? 0 },
+        start: { lat: startLat, lng: startLng },
+        end: { lat: endLat, lng: endLng },
       }];
     }));
     const middle = stops.length - 1;
