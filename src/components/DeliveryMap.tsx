@@ -6,6 +6,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { searchPlaces, planRoute, snapPath } from "@/lib/maps.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ArrowUp, CornerUpLeft, CornerUpRight, Flag, Navigation, RotateCcw, RotateCw } from "lucide-react";
+import { advanceStep, distanceBetween, navigationDistance, type NavigationPlan } from "@/lib/navigation";
 
 type LatLng = { lat: number; lng: number };
 type Stop = { id: string; name: string; address: string; lat: number; lng: number };
@@ -40,7 +42,7 @@ function haversine(a: LatLng, b: LatLng) {
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * toR) * Math.cos(b.lat * toR) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(h));
 }
-const pathLength = (p: LatLng[]) => p.reduce((s, c, i) => (i ? s + haversine(p[i - 1]!, c) : 0), 0);
+const pathLength = (p: LatLng[]) => p.reduce((s, c, i) => { const previous = p[i - 1]; return previous ? s + haversine(previous, c) : s; }, 0);
 const km = (m: number) => `${(m / 1000).toFixed(1)} km`;
 
 export function DeliveryMap() {
@@ -59,7 +61,8 @@ export function DeliveryMap() {
   const [results, setResults] = useState<Stop[]>([]);
   const [searching, setSearching] = useState(false);
   const [stops, setStops] = useState<Stop[]>([]);
-  const [plan, setPlan] = useState<{ distanceMeters: number; durationSeconds: number } | null>(null);
+  const [plan, setPlan] = useState<NavigationPlan | null>(null);
+  const [stepIndex, setStepIndex] = useState(0);
   const [recording, setRecording] = useState(false);
   const [raw, setRaw] = useState<LatLng[]>([]);
   const [startedAt, setStartedAt] = useState<string | null>(null);
@@ -71,6 +74,11 @@ export function DeliveryMap() {
   const doSearch = useServerFn(searchPlaces);
   const doPlan = useServerFn(planRoute);
   const doSnap = useServerFn(snapPath);
+
+  useEffect(() => {
+    if (!recording || !me || !plan) return;
+    setStepIndex((current) => advanceStep(plan.steps, current, me));
+  }, [recording, me, plan]);
 
   // Map init
   useEffect(() => {
@@ -112,10 +120,10 @@ export function DeliveryMap() {
 
   // My position marker
   useEffect(() => {
-    if (!ready || !me) return;
+    if (!ready || !me || !map.current) return;
     if (!meMarker.current) {
       meMarker.current = new google.maps.Marker({
-        map: map.current!, position: me, zIndex: 999,
+        map: map.current, position: me, zIndex: 999,
         icon: { path: google.maps.SymbolPath.CIRCLE, scale: 8, fillColor: "#4ea1ff", fillOpacity: 1, strokeColor: "#fff", strokeWeight: 3 },
       });
     } else meMarker.current.setPosition(me);
@@ -123,10 +131,10 @@ export function DeliveryMap() {
 
   // Stop markers
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !map.current) return;
     markers.current.forEach((m) => m.setMap(null));
     markers.current = stops.map((s, i) => new google.maps.Marker({
-      map: map.current!, position: s, title: s.name,
+      map: map.current, position: s, title: s.name,
       label: { text: String(i + 1), color: "#111", fontWeight: "700" },
       icon: { path: google.maps.SymbolPath.CIRCLE, scale: 13, fillColor: COLORS.stop, fillOpacity: 1, strokeColor: "#111", strokeWeight: 2 },
     }));
@@ -134,8 +142,8 @@ export function DeliveryMap() {
 
   // Live recorded line
   useEffect(() => {
-    if (!ready) return;
-    if (!liveLine.current) liveLine.current = new google.maps.Polyline({ map: map.current!, strokeColor: COLORS.live, strokeOpacity: 0.9, strokeWeight: 5 });
+    if (!ready || !map.current) return;
+    if (!liveLine.current) liveLine.current = new google.maps.Polyline({ map: map.current, strokeColor: COLORS.live, strokeOpacity: 0.9, strokeWeight: 5 });
     liveLine.current.setPath(raw);
   }, [ready, raw]);
 
@@ -175,6 +183,7 @@ export function DeliveryMap() {
   function addStop(s: Stop) {
     setStops((prev) => (prev.some((p) => p.id === s.id) ? prev : [...prev, s]));
     setResults([]); setQuery(""); setPlan(null);
+    clearLines();
     map.current?.panTo(s);
   }
 
@@ -184,24 +193,26 @@ export function DeliveryMap() {
   }
 
   async function optimize() {
-    if (!me) { toast.error("Preciso da sua localização para planejar."); return; }
-    if (!stops.length) return;
+    if (!me) { toast.error("Preciso da sua localização para planejar."); return false; }
+    if (!stops.length || !ready || !map.current) return false;
     setBusy(true);
     try {
       const r = await doPlan({ data: { origin: me, stops: stops.map(({ lat, lng }) => ({ lat, lng })) } });
       setStops(r.order.map((i) => stops[i]).filter((x): x is Stop => !!x));
       clearLines();
       planLine.current = new google.maps.Polyline({
-        map: map.current!, path: google.maps.geometry.encoding.decodePath(r.polyline),
-        strokeColor: COLORS.plan, strokeOpacity: 0, strokeWeight: 4,
-        icons: [{ icon: { path: "M 0,-1 0,1", strokeOpacity: 1, scale: 3 }, offset: "0", repeat: "14px" }],
+        map: map.current, path: google.maps.geometry.encoding.decodePath(r.polyline),
+        strokeColor: COLORS.plan, strokeOpacity: 1, strokeWeight: 7, zIndex: 20,
+        icons: [{ icon: { path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW, fillColor: COLORS.plan, fillOpacity: 1, strokeColor: getComputedStyle(document.documentElement).getPropertyValue("--route-arrow").trim(), strokeOpacity: 1, strokeWeight: 2, scale: 3 }, offset: "35px", repeat: "90px" }],
       });
       const b = new google.maps.LatLngBounds();
       planLine.current.getPath().forEach((p) => b.extend(p));
       map.current?.fitBounds(b, 60);
       setPlan(r);
-    } catch (err) { toast.error((err as Error).message); }
-    setBusy(false);
+      setStepIndex(0);
+      return true;
+    } catch (err) { toast.error((err as Error).message); return false; }
+    finally { setBusy(false); }
   }
 
   function startWatch() {
@@ -210,8 +221,8 @@ export function DeliveryMap() {
     watchId.current = navigator.geolocation.watchPosition(
       (p) => {
         const pos = { lat: p.coords.latitude, lng: p.coords.longitude };
-        setMe(pos);
         if (p.coords.accuracy > 35) return; // ignore imprecise fixes
+        setMe(pos);
         setRaw((prev) => {
           const last = prev[prev.length - 1];
           if (last && haversine(last, pos) < 6) return prev;
@@ -224,8 +235,10 @@ export function DeliveryMap() {
     );
   }
 
-  function start() {
-    clearLines();
+  async function start() {
+    if (!ready) return;
+    if (stops.length && !plan && !(await optimize())) return;
+    snapLine.current?.setMap(null); snapLine.current = null;
     setRaw(me ? [me] : []);
     setStartedAt(new Date().toISOString());
     startWatch();
@@ -257,24 +270,27 @@ export function DeliveryMap() {
     if (error) { toast.error(error.message); return; }
     localStorage.removeItem(REC_KEY);
     drawSnapped(snapped);
-    setRaw([]); setStops([]); setPlan(null);
+    setRaw([]); setStops([]); setPlan(null); setStepIndex(0);
     toast.success("Rota salva!");
     loadRoutes();
   }
 
   function drawSnapped(path: LatLng[]) {
+    if (!map.current) return;
     clearLines();
-    snapLine.current = new google.maps.Polyline({ map: map.current!, path, strokeColor: COLORS.snapped, strokeOpacity: 1, strokeWeight: 6, zIndex: 10 });
+    snapLine.current = new google.maps.Polyline({ map: map.current, path, strokeColor: COLORS.snapped, strokeOpacity: 1, strokeWeight: 6, zIndex: 10 });
     const b = new google.maps.LatLngBounds();
     path.forEach((p) => b.extend(p));
     if (path.length) map.current?.fitBounds(b, 60);
   }
 
   function showRoute(r: SavedRoute) {
+    if (!map.current || recording) return;
+    setPlan(null);
     drawSnapped(r.snapped_path?.length ? r.snapped_path : r.raw_path);
     markers.current.forEach((m) => m.setMap(null));
     markers.current = (r.stops ?? []).map((s, i) => new google.maps.Marker({
-      map: map.current!, position: s, label: { text: String(i + 1), color: "#111", fontWeight: "700" },
+      map: map.current, position: s, label: { text: String(i + 1), color: "#111", fontWeight: "700" },
       icon: { path: google.maps.SymbolPath.CIRCLE, scale: 13, fillColor: COLORS.stop, fillOpacity: 1, strokeColor: "#111", strokeWeight: 2 },
     }));
     setOpen(false);
@@ -288,6 +304,14 @@ export function DeliveryMap() {
   }
 
   const recDistance = pathLength(raw);
+  const currentStep = plan?.steps[stepIndex];
+  const nextStep = plan?.steps[stepIndex + 1];
+  const guidance = recording ? nextStep ?? currentStep : currentStep;
+  const distanceToTurn = recording && currentStep && me ? distanceBetween(me, currentStep.end) : null;
+  const arrived = recording && !!plan?.steps.length && stepIndex >= plan.steps.length;
+  const maneuver = guidance?.maneuver ?? "";
+  const DirectionIcon = arrived ? Flag : maneuver.includes("U_TURN") ? (maneuver.includes("LEFT") ? RotateCcw : RotateCw)
+    : maneuver.includes("LEFT") ? CornerUpLeft : maneuver.includes("RIGHT") ? CornerUpRight : ArrowUp;
 
   return (
     <div className="relative h-[100dvh] w-full overflow-hidden bg-background">
@@ -299,8 +323,19 @@ export function DeliveryMap() {
         <Button variant="secondary" size="sm" onClick={() => supabase.auth.signOut()}>Sair</Button>
       </header>
 
+      {(guidance || arrived) && (
+        <aside aria-label="Próxima direção" aria-live="polite" className="absolute inset-x-3 top-16 z-10 mx-auto flex max-w-xl items-center gap-3 rounded-lg border border-border bg-card/95 p-3 shadow-panel">
+          <DirectionIcon className="h-9 w-9 shrink-0 text-primary" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-primary">{arrived ? "Destino alcançado" : distanceToTurn !== null ? `Em aproximadamente ${navigationDistance(distanceToTurn)}` : "Saída"}</p>
+            <p className="text-base font-bold leading-tight">{arrived ? "Fim do caminho planejado" : guidance?.instruction}</p>
+          </div>
+          <Button variant="secondary" size="icon" aria-label="Centralizar na minha localização" title="Minha localização" onClick={() => { if (me) { map.current?.panTo(me); map.current?.setZoom(18); } }}><Navigation /></Button>
+        </aside>
+      )}
+
       {recording && (
-        <div className="absolute left-1/2 top-16 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full bg-card/95 px-4 py-2 shadow-panel">
+        <div className={`absolute left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full bg-card/95 px-4 py-2 shadow-panel ${guidance || arrived ? "bottom-24" : "top-16"}`}>
           <span className="rec-pulse h-3 w-3 rounded-full bg-destructive" />
           <span className="font-display text-lg font-bold">GRAVANDO · {km(recDistance)}</span>
         </div>
@@ -318,8 +353,8 @@ export function DeliveryMap() {
               {busy ? "Alinhando às ruas…" : "Finalizar e salvar rota"}
             </Button>
           ) : (
-            <Button disabled={busy} onClick={start} className="h-14 w-full font-display text-xl font-bold uppercase">
-              Iniciar trajeto {stops.length ? `(${stops.length} entregas)` : ""}
+            <Button disabled={busy || !ready} onClick={start} className="h-14 w-full font-display text-xl font-bold uppercase">
+              {busy ? "Calculando caminho…" : `Iniciar trajeto ${stops.length ? `(${stops.length} entregas)` : ""}`}
             </Button>
           )}
 
@@ -360,7 +395,7 @@ export function DeliveryMap() {
                           <div className="truncate font-semibold">{s.name}</div>
                           <div className="truncate text-xs text-muted-foreground">{s.address}</div>
                         </div>
-                        <button onClick={() => { setStops(stops.filter((x) => x.id !== s.id)); setPlan(null); }} className="text-muted-foreground hover:text-destructive" aria-label="Remover">✕</button>
+                         <button onClick={() => { setStops(stops.filter((x) => x.id !== s.id)); setPlan(null); clearLines(); }} className="text-muted-foreground hover:text-destructive" aria-label="Remover">✕</button>
                       </li>
                     ))}
                     {!stops.length && <li className="py-2 text-center text-sm text-muted-foreground">Busque e adicione os endereços das entregas.</li>}
@@ -371,9 +406,17 @@ export function DeliveryMap() {
                     </Button>
                   )}
                   {plan && (
+                    <>
                     <p className="text-center text-sm text-muted-foreground">
                       Previsto: <b className="text-foreground">{km(plan.distanceMeters)}</b> · {Math.round(plan.durationSeconds / 60)} min
                     </p>
+                    {plan.steps.length > 0 && <details className="border-t border-border pt-2">
+                      <summary className="cursor-pointer text-sm font-semibold">Conversões · {plan.steps.length}</summary>
+                      <ol className="mt-2 max-h-36 space-y-2 overflow-auto">
+                        {plan.steps.map((step, i) => <li key={i} className="flex gap-2 text-sm"><span className="text-primary">{i + 1}.</span><div>{step.instruction}<span className="block text-xs text-muted-foreground">{navigationDistance(step.distanceMeters)}</span></div></li>)}
+                      </ol>
+                    </details>}
+                    </>
                   )}
                 </div>
               ) : (
