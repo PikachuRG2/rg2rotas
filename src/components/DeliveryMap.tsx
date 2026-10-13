@@ -40,7 +40,7 @@ function haversine(a: LatLng, b: LatLng) {
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * toR) * Math.cos(b.lat * toR) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(h));
 }
-const pathLength = (p: LatLng[]) => p.reduce((s, c, i) => (i ? s + haversine(p[i - 1], c) : 0), 0);
+const pathLength = (p: LatLng[]) => p.reduce((s, c, i) => (i ? s + haversine(p[i - 1]!, c) : 0), 0);
 const km = (m: number) => `${(m / 1000).toFixed(1)} km`;
 
 export function DeliveryMap() {
@@ -141,7 +141,7 @@ export function DeliveryMap() {
 
   const loadRoutes = useCallback(async () => {
     const { data, error } = await supabase.from("delivery_routes").select("*").order("created_at", { ascending: false }).limit(50);
-    if (error) return toast.error(error.message);
+    if (error) { toast.error(error.message); return; }
     setRoutes((data ?? []) as unknown as SavedRoute[]);
   }, []);
   useEffect(() => { loadRoutes(); }, [loadRoutes]);
@@ -167,7 +167,7 @@ export function DeliveryMap() {
     if (query.trim().length < 3) return;
     setSearching(true);
     try {
-      setResults(await doSearch({ data: { query, bias: me ?? undefined } }));
+      setResults(await doSearch({ data: { query, ...(me ? { bias: me } : {}) } }));
     } catch (err) { toast.error((err as Error).message); }
     setSearching(false);
   }
@@ -184,12 +184,12 @@ export function DeliveryMap() {
   }
 
   async function optimize() {
-    if (!me) return toast.error("Preciso da sua localização para planejar.");
+    if (!me) { toast.error("Preciso da sua localização para planejar."); return; }
     if (!stops.length) return;
     setBusy(true);
     try {
       const r = await doPlan({ data: { origin: me, stops: stops.map(({ lat, lng }) => ({ lat, lng })) } });
-      setStops(r.order.map((i) => stops[i]));
+      setStops(r.order.map((i) => stops[i]).filter((x): x is Stop => !!x));
       clearLines();
       planLine.current = new google.maps.Polyline({
         map: map.current!, path: google.maps.geometry.encoding.decodePath(r.polyline),
@@ -205,7 +205,7 @@ export function DeliveryMap() {
   }
 
   function startWatch() {
-    if (!navigator.geolocation) return toast.error("Seu aparelho não tem GPS disponível.");
+    if (!navigator.geolocation) { toast.error("Seu aparelho não tem GPS disponível."); return; }
     setRecording(true);
     watchId.current = navigator.geolocation.watchPosition(
       (p) => {
@@ -239,7 +239,7 @@ export function DeliveryMap() {
     if (raw.length < 2) {
       localStorage.removeItem(REC_KEY);
       setRaw([]);
-      return toast("Trajeto muito curto, nada foi salvo.");
+      { toast("Trajeto muito curto, nada foi salvo."); return; }
     }
     setBusy(true);
     let snapped: LatLng[] = raw;
@@ -254,7 +254,7 @@ export function DeliveryMap() {
       started_at: startedAt, ended_at: new Date().toISOString(),
     });
     setBusy(false);
-    if (error) return toast.error(error.message);
+    if (error) { toast.error(error.message); return; }
     localStorage.removeItem(REC_KEY);
     drawSnapped(snapped);
     setRaw([]); setStops([]); setPlan(null);
@@ -282,7 +282,7 @@ export function DeliveryMap() {
 
   async function removeRoute(id: string) {
     const { error } = await supabase.from("delivery_routes").delete().eq("id", id);
-    if (error) return toast.error(error.message);
+    if (error) { toast.error(error.message); return; }
     clearLines();
     loadRoutes();
   }

@@ -35,7 +35,7 @@ export const searchPlaces = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const body: Record<string, unknown> = { textQuery: data.query, pageSize: 6, languageCode: "pt-BR" };
     if (data.bias) {
-      body.locationBias = {
+      body["locationBias"] = {
         circle: { center: { latitude: data.bias.lat, longitude: data.bias.lng }, radius: 30000 },
       };
     }
@@ -80,7 +80,7 @@ export const planRoute = createServerFn({ method: "POST" })
       },
       body: JSON.stringify({
         origin: wp(data.origin),
-        destination: wp(stops[stops.length - 1]),
+        destination: wp(stops[stops.length - 1]!),
         intermediates: stops.slice(0, -1).map(wp),
         travelMode: "TWO_WHEELER",
         optimizeWaypointOrder: stops.length > 2,
