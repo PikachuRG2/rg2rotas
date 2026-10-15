@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ArrowUp, CornerUpLeft, CornerUpRight, Flag, Navigation, RotateCcw, RotateCw } from "lucide-react";
 import { advanceStep, distanceBetween, navigationDistance, type NavigationPlan } from "@/lib/navigation";
+import { useKeepAwake } from "@/hooks/use-keep-awake";
 
 type LatLng = { lat: number; lng: number };
 type Stop = { id: string; name: string; address: string; lat: number; lng: number };
@@ -74,6 +75,9 @@ export function DeliveryMap() {
   const doSearch = useServerFn(searchPlaces);
   const doPlan = useServerFn(planRoute);
   const doSnap = useServerFn(snapPath);
+
+  // Mantém a tela acesa enquanto o app estiver aberto em primeiro plano.
+  useKeepAwake(true);
 
   useEffect(() => {
     if (!recording || !me || !plan) return;
