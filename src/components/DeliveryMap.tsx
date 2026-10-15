@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { ArrowUp, CornerUpLeft, CornerUpRight, Flag, Navigation, RotateCcw, RotateCw } from "lucide-react";
 import { advanceStep, distanceBetween, navigationDistance, type NavigationPlan } from "@/lib/navigation";
 import { useKeepAwake } from "@/hooks/use-keep-awake";
+import { useHeading, requestCompassPermission } from "@/hooks/use-heading";
 
 type LatLng = { lat: number; lng: number };
 type Stop = { id: string; name: string; address: string; lat: number; lng: number };
@@ -78,6 +79,9 @@ export function DeliveryMap() {
 
   // Mantém a tela acesa enquanto o app estiver aberto em primeiro plano.
   useKeepAwake(true);
+  const compass = useHeading(recording);
+  const [gpsHeading, setGpsHeading] = useState<number | null>(null);
+  const heading = recording ? compass ?? gpsHeading ?? 0 : 0;
 
   useEffect(() => {
     if (!recording || !me || !plan) return;
@@ -125,13 +129,13 @@ export function DeliveryMap() {
   // My position marker
   useEffect(() => {
     if (!ready || !me || !map.current) return;
+    const icon: google.maps.Symbol = recording
+      ? { path: "M0,-14 L10,10 L0,4 L-10,10 Z", scale: 1.6, fillColor: "#4ea1ff", fillOpacity: 1, strokeColor: "#fff", strokeWeight: 2.5, rotation: heading, anchor: new google.maps.Point(0, 0) }
+      : { path: google.maps.SymbolPath.CIRCLE, scale: 8, fillColor: "#4ea1ff", fillOpacity: 1, strokeColor: "#fff", strokeWeight: 3 };
     if (!meMarker.current) {
-      meMarker.current = new google.maps.Marker({
-        map: map.current, position: me, zIndex: 999,
-        icon: { path: google.maps.SymbolPath.CIRCLE, scale: 8, fillColor: "#4ea1ff", fillOpacity: 1, strokeColor: "#fff", strokeWeight: 3 },
-      });
-    } else meMarker.current.setPosition(me);
-  }, [ready, me]);
+      meMarker.current = new google.maps.Marker({ map: map.current, position: me, zIndex: 999, icon });
+    } else { meMarker.current.setPosition(me); meMarker.current.setIcon(icon); }
+  }, [ready, me, recording, heading]);
 
   // Stop markers
   useEffect(() => {
@@ -222,11 +226,14 @@ export function DeliveryMap() {
   function startWatch() {
     if (!navigator.geolocation) { toast.error("Seu aparelho não tem GPS disponível."); return; }
     setRecording(true);
+    void requestCompassPermission();
+    map.current?.setZoom(18);
     watchId.current = navigator.geolocation.watchPosition(
       (p) => {
         const pos = { lat: p.coords.latitude, lng: p.coords.longitude };
         if (p.coords.accuracy > 35) return; // ignore imprecise fixes
         setMe(pos);
+        if (p.coords.heading !== null && !Number.isNaN(p.coords.heading) && (p.coords.speed ?? 0) > 2) setGpsHeading(p.coords.heading);
         setRaw((prev) => {
           const last = prev[prev.length - 1];
           if (last && haversine(last, pos) < 6) return prev;
@@ -319,7 +326,13 @@ export function DeliveryMap() {
 
   return (
     <div className="relative h-[100dvh] w-full overflow-hidden bg-background">
-      <div ref={mapEl} className="absolute inset-0" />
+      <div
+        ref={mapEl}
+        className="absolute left-1/2 top-1/2 transition-transform duration-300 ease-out"
+        style={recording
+          ? { width: "150vmax", height: "150vmax", transform: `translate(-50%, -50%) rotate(${-heading}deg)` }
+          : { width: "100%", height: "100%", transform: "translate(-50%, -50%)" }}
+      />
 
       {/* Top bar */}
       <header className="absolute left-3 right-3 top-3 z-10 flex items-center justify-between gap-2">
