@@ -8,6 +8,13 @@
       "when": 1791881720935,
       "tag": "0000_create_routes",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792620286155,
+      "tag": "0001_create_clients",
+      "breakpoints": true
     }
   ]
 }
