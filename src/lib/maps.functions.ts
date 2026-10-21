@@ -155,3 +155,25 @@ export const snapPath = createServerFn({ method: "POST" })
     }
     return out;
   });
+
+export const reverseGeocode = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: LatLng) => {
+    const lat = Number(d.lat), lng = Number(d.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) throw new Error("Localização inválida.");
+    return { lat, lng };
+  })
+  .handler(async ({ data }) => {
+    const res = await fetch(`${GATEWAY_URL}/maps/api/geocode/json?latlng=${data.lat},${data.lng}&language=pt-BR&result_type=street_address|premise`, { headers: creds() });
+    const json = (await check(res)) as {
+      status: string;
+      results?: { formatted_address: string; address_components: { long_name: string; types: string[] }[] }[];
+    };
+    let r = json.results?.[0];
+    if (!r) {
+      const res2 = await fetch(`${GATEWAY_URL}/maps/api/geocode/json?latlng=${data.lat},${data.lng}&language=pt-BR`, { headers: creds() });
+      r = ((await check(res2)) as typeof json).results?.[0];
+    }
+    const street = r?.address_components.find((c) => c.types.includes("route"))?.long_name ?? "";
+    return { address: r?.formatted_address ?? "", street };
+  });

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { searchPlaces, planRoute, snapPath } from "@/lib/maps.functions";
+import { searchPlaces, planRoute, snapPath, reverseGeocode } from "@/lib/maps.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ArrowUp, CornerUpLeft, CornerUpRight, Flag, Navigation, RotateCcw, RotateCw } from "lucide-react";
@@ -12,6 +12,8 @@ import { useKeepAwake } from "@/hooks/use-keep-awake";
 import { useHeading, requestCompassPermission } from "@/hooks/use-heading";
 
 type LatLng = { lat: number; lng: number };
+type Client = { id: string; name: string; street: string; address: string; lat: number; lng: number };
+const norm = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 type Stop = { id: string; name: string; address: string; lat: number; lng: number };
 type SavedRoute = {
   id: string; name: string; stops: Stop[]; snapped_path: LatLng[]; raw_path: LatLng[];
@@ -70,7 +72,11 @@ export function DeliveryMap() {
   const [startedAt, setStartedAt] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [routes, setRoutes] = useState<SavedRoute[]>([]);
-  const [tab, setTab] = useState<"entregas" | "historico">("entregas");
+  const [tab, setTab] = useState<"entregas" | "clientes" | "historico">("entregas");
+  const [clients, setClients] = useState<Client[]>([]);
+  const [clientName, setClientName] = useState("");
+  const [savingClient, setSavingClient] = useState(false);
+  const doReverse = useServerFn(reverseGeocode);
   const [open, setOpen] = useState(true);
 
   const doSearch = useServerFn(searchPlaces);
@@ -178,6 +184,47 @@ export function DeliveryMap() {
     if (recording && startedAt) localStorage.setItem(REC_KEY, JSON.stringify({ raw, stops, startedAt }));
   }, [recording, raw, stops, startedAt]);
 
+  const loadClients = useCallback(async () => {
+    const { data } = await supabase.from("clients").select("id,name,street,address,lat,lng").order("name");
+    setClients(data ?? []);
+  }, []);
+  useEffect(() => { loadClients(); }, [loadClients]);
+
+  async function saveClient() {
+    const name = clientName.trim();
+    if (!name) { toast.error("Digite o nome do cliente."); return; }
+    if (!navigator.geolocation) { toast.error("GPS indisponível."); return; }
+    setSavingClient(true);
+    try {
+      const p = await new Promise<GeolocationPosition>((ok, fail) =>
+        navigator.geolocation.getCurrentPosition(ok, fail, { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }));
+      const pos = { lat: p.coords.latitude, lng: p.coords.longitude };
+      let addr = { address: "", street: "" };
+      try { addr = await doReverse({ data: pos }); } catch { /* keep coords */ }
+      const { error } = await supabase.from("clients").insert({ name: name.slice(0, 100), ...addr, ...pos });
+      if (error) throw error;
+      toast.success(`${name} salvo${p.coords.accuracy > 30 ? ` (precisão ${Math.round(p.coords.accuracy)} m)` : ""}`);
+      setClientName("");
+      loadClients();
+    } catch (err) { toast.error((err as Error).message || "Não consegui pegar sua localização."); }
+    setSavingClient(false);
+  }
+
+  async function deleteClient(id: string) {
+    await supabase.from("clients").delete().eq("id", id);
+    setClients((c) => c.filter((x) => x.id !== id));
+  }
+
+  async function routeToClient(c: Client) {
+    const s: Stop = { id: `client-${c.id}`, name: `👤 ${c.name}`, address: c.address || c.street, lat: c.lat, lng: c.lng };
+    const list = stops.some((p) => p.id === s.id) ? stops : [...stops, s];
+    setStops(list); setResults([]); setQuery(""); setTab("entregas");
+    await optimize(list);
+  }
+
+  const q = norm(query.trim());
+  const matchedClients = q.length >= 2 ? clients.filter((c) => norm(`${c.name} ${c.street} ${c.address}`).includes(q)).slice(0, 8) : [];
+
   async function search(e: React.FormEvent) {
     e.preventDefault();
     if (query.trim().length < 3) return;
@@ -200,13 +247,13 @@ export function DeliveryMap() {
     snapLine.current?.setMap(null); snapLine.current = null;
   }
 
-  async function optimize() {
+  async function optimize(list: Stop[] = stops) {
     if (!me) { toast.error("Preciso da sua localização para planejar."); return false; }
-    if (!stops.length || !ready || !map.current) return false;
+    if (!list.length || !ready || !map.current) return false;
     setBusy(true);
     try {
-      const r = await doPlan({ data: { origin: me, stops: stops.map(({ lat, lng }) => ({ lat, lng })) } });
-      setStops(r.order.map((i) => stops[i]).filter((x): x is Stop => !!x));
+      const r = await doPlan({ data: { origin: me, stops: list.map(({ lat, lng }) => ({ lat, lng })) } });
+      setStops(r.order.map((i) => list[i]).filter((x): x is Stop => !!x));
       clearLines();
       planLine.current = new google.maps.Polyline({
         map: map.current, path: google.maps.geometry.encoding.decodePath(r.polyline),
@@ -377,21 +424,53 @@ export function DeliveryMap() {
 
           {open && !recording && (
             <div className="mt-4">
-              <div className="mb-3 grid grid-cols-2 gap-1 rounded-lg bg-muted p-1">
-                {(["entregas", "historico"] as const).map((t) => (
+              <div className="mb-3 grid grid-cols-3 gap-1 rounded-lg bg-muted p-1">
+                {(["entregas", "clientes", "historico"] as const).map((t) => (
                   <button key={t} onClick={() => setTab(t)}
                     className={`rounded-md py-1.5 text-sm font-semibold capitalize transition ${tab === t ? "bg-secondary text-foreground" : "text-muted-foreground"}`}>
-                    {t === "historico" ? "Rotas salvas" : "Entregas"}
+                    {t === "historico" ? "Rotas salvas" : t === "clientes" ? "Clientes" : "Entregas"}
                   </button>
                 ))}
               </div>
 
-              {tab === "entregas" ? (
+              {tab === "clientes" ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-muted-foreground">Na porta do cliente, digite o nome e salve. Depois é só buscar pelo nome ou pela rua.</p>
+                  <div className="flex gap-2">
+                    <Input value={clientName} onChange={(e) => setClientName(e.target.value)} placeholder="Nome do cliente…" className="h-11" />
+                    <Button onClick={saveClient} disabled={savingClient} className="h-11">{savingClient ? "Salvando…" : "Salvar minha localização"}</Button>
+                  </div>
+                  <ul className="max-h-60 space-y-1.5 overflow-auto">
+                    {clients.map((c) => (
+                      <li key={c.id} className="flex items-center gap-2 rounded-lg bg-secondary px-3 py-2">
+                        <button onClick={() => routeToClient(c)} className="min-w-0 flex-1 text-left">
+                          <div className="truncate font-semibold">{c.name}</div>
+                          <div className="truncate text-xs text-muted-foreground">{c.address || `${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}`}</div>
+                        </button>
+                        <button onClick={() => deleteClient(c.id)} className="text-muted-foreground hover:text-destructive" aria-label={`Apagar ${c.name}`}>✕</button>
+                      </li>
+                    ))}
+                    {!clients.length && <li className="py-2 text-center text-sm text-muted-foreground">Nenhum cliente salvo ainda.</li>}
+                  </ul>
+                </div>
+              ) : tab === "entregas" ? (
                 <div className="space-y-3">
                   <form onSubmit={search} className="flex gap-2">
                     <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Endereço da entrega…" className="h-11" />
                     <Button type="submit" variant="secondary" disabled={searching} className="h-11">{searching ? "…" : "Buscar"}</Button>
                   </form>
+                  {matchedClients.length > 0 && (
+                    <ul aria-label="Clientes encontrados" className="max-h-48 overflow-auto rounded-lg border border-primary/50">
+                      {matchedClients.map((c) => (
+                        <li key={c.id}>
+                          <button onClick={() => routeToClient(c)} className="w-full border-b border-border px-3 py-2 text-left last:border-0 hover:bg-secondary">
+                            <div className="font-semibold"><span className="mr-2 rounded bg-primary px-1.5 py-0.5 text-xs font-bold text-primary-foreground">CLIENTE</span>{c.name}</div>
+                            <div className="text-xs text-muted-foreground">{c.address || c.street}</div>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                   {results.length > 0 && (
                     <ul className="max-h-48 overflow-auto rounded-lg border border-border">
                       {results.map((r) => (
@@ -418,7 +497,7 @@ export function DeliveryMap() {
                     {!stops.length && <li className="py-2 text-center text-sm text-muted-foreground">Busque e adicione os endereços das entregas.</li>}
                   </ol>
                   {stops.length > 0 && (
-                    <Button variant="outline" disabled={busy} onClick={optimize} className="w-full">
+                    <Button variant="outline" disabled={busy} onClick={() => optimize()} className="w-full">
                       {busy ? "Calculando…" : "Planejar melhor ordem"}
                     </Button>
                   )}

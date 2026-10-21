@@ -14,6 +14,39 @@ export type Database = {
   }
   public: {
     Tables: {
+      clients: {
+        Row: {
+          address: string
+          created_at: string
+          id: string
+          lat: number
+          lng: number
+          name: string
+          street: string
+          user_id: string
+        }
+        Insert: {
+          address?: string
+          created_at?: string
+          id?: string
+          lat: number
+          lng: number
+          name: string
+          street?: string
+          user_id?: string
+        }
+        Update: {
+          address?: string
+          created_at?: string
+          id?: string
+          lat?: number
+          lng?: number
+          name?: string
+          street?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       delivery_routes: {
         Row: {
           created_at: string
