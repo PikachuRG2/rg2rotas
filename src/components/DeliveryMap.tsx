@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { searchPlaces, planRoute, snapPath } from "@/lib/maps.functions";
+import { searchPlaces, planRoute, snapPath, reverseGeocode } from "@/lib/maps.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ArrowUp, CornerUpLeft, CornerUpRight, Flag, Navigation, RotateCcw, RotateCw } from "lucide-react";
@@ -497,7 +497,7 @@ export function DeliveryMap() {
                     {!stops.length && <li className="py-2 text-center text-sm text-muted-foreground">Busque e adicione os endereços das entregas.</li>}
                   </ol>
                   {stops.length > 0 && (
-                    <Button variant="outline" disabled={busy} onClick={optimize} className="w-full">
+                    <Button variant="outline" disabled={busy} onClick={() => optimize()} className="w-full">
                       {busy ? "Calculando…" : "Planejar melhor ordem"}
                     </Button>
                   )}
