@@ -189,6 +189,14 @@ export function DeliveryMap() {
     setClients(data ?? []);
   }, []);
   useEffect(() => { loadClients(); }, [loadClients]);
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => {
+    supabase.auth.getUser().then(async ({ data }) => {
+      if (!data.user) return;
+      const { data: ok } = await supabase.rpc("has_role", { _user_id: data.user.id, _role: "admin" });
+      setIsAdmin(!!ok);
+    });
+  }, []);
 
   async function saveClient() {
     const name = clientName.trim();
@@ -435,11 +443,15 @@ export function DeliveryMap() {
 
               {tab === "clientes" ? (
                 <div className="space-y-3">
-                  <p className="text-sm text-muted-foreground">Na porta do cliente, digite o nome e salve. Depois é só buscar pelo nome ou pela rua.</p>
+                  {isAdmin ? (<>
+                  <p className="text-sm text-muted-foreground">Na porta do cliente, digite o nome e salve. Todos os motoboys vão ver.</p>
                   <div className="flex gap-2">
                     <Input value={clientName} onChange={(e) => setClientName(e.target.value)} placeholder="Nome do cliente…" className="h-11" />
                     <Button onClick={saveClient} disabled={savingClient} className="h-11">{savingClient ? "Salvando…" : "Salvar minha localização"}</Button>
                   </div>
+                  </>) : (
+                  <p className="text-sm text-muted-foreground">Clientes cadastrados pelo administrador. Toque em um para ver a rota.</p>
+                  )}
                   <ul className="max-h-60 space-y-1.5 overflow-auto">
                     {clients.map((c) => (
                       <li key={c.id} className="flex items-center gap-2 rounded-lg bg-secondary px-3 py-2">
@@ -447,7 +459,7 @@ export function DeliveryMap() {
                           <div className="truncate font-semibold">{c.name}</div>
                           <div className="truncate text-xs text-muted-foreground">{c.address || `${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}`}</div>
                         </button>
-                        <button onClick={() => deleteClient(c.id)} className="text-muted-foreground hover:text-destructive" aria-label={`Apagar ${c.name}`}>✕</button>
+                        {isAdmin && <button onClick={() => deleteClient(c.id)} className="text-muted-foreground hover:text-destructive" aria-label={`Apagar ${c.name}`}>✕</button>}
                       </li>
                     ))}
                     {!clients.length && <li className="py-2 text-center text-sm text-muted-foreground">Nenhum cliente salvo ainda.</li>}
