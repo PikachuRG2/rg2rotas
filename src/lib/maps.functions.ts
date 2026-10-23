@@ -177,3 +177,25 @@ export const reverseGeocode = createServerFn({ method: "POST" })
     const street = r?.address_components.find((c) => c.types.includes("route"))?.long_name ?? "";
     return { address: r?.formatted_address ?? "", street };
   });
+
+const SHORT_HOSTS = ["maps.app.goo.gl", "goo.gl"];
+export const resolveMapsLink = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: { url: string }) => {
+    const u = new URL(String(input.url).trim());
+    if (u.protocol !== "https:" || !SHORT_HOSTS.includes(u.hostname)) throw new Error("Link do Google Maps inválido.");
+    return { url: u.href };
+  })
+  .handler(async ({ data }) => {
+    let url = data.url;
+    for (let i = 0; i < 5; i++) {
+      const res = await fetch(url, { redirect: "manual" });
+      const next = res.headers.get("location");
+      if (!next) break;
+      url = new URL(next, url).href;
+      const host = new URL(url).hostname;
+      if (!SHORT_HOSTS.includes(host) && !/(^|\.)google\.[a-z.]+$/.test(host)) break;
+      if (/!3d-?\d|@-?\d|[?&](q|query|ll)=-?\d/.test(url)) break;
+    }
+    return { url };
+  });
