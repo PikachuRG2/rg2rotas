@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ArrowUp, CornerUpLeft, CornerUpRight, Flag, Navigation, RotateCcw, RotateCw } from "lucide-react";
 import { advanceStep, distanceBetween, navigationDistance, type NavigationPlan } from "@/lib/navigation";
+import { parseCoords } from "@/lib/coords";
 import { useKeepAwake } from "@/hooks/use-keep-awake";
 import { useHeading, requestCompassPermission } from "@/hooks/use-heading";
 
@@ -238,6 +239,12 @@ export function DeliveryMap() {
     if (query.trim().length < 3) return;
     setSearching(true);
     try {
+      const c = parseCoords(query);
+      if (c) {
+        let addr = { address: "", street: "" };
+        try { addr = await doReverse({ data: c }); } catch { /* keep coords */ }
+        setResults([{ id: `coord-${c.lat},${c.lng}`, name: addr.street || "Coordenada", address: addr.address || `${c.lat.toFixed(6)}, ${c.lng.toFixed(6)}`, ...c }]);
+      } else
       setResults(await doSearch({ data: { query, ...(me ? { bias: me } : {}) } }));
     } catch (err) { toast.error((err as Error).message); }
     setSearching(false);
