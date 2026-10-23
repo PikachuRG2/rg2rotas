@@ -15,6 +15,13 @@
       "when": 1792620286155,
       "tag": "0001_create_clients",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792787936193,
+      "tag": "0002_admin_shared_clients",
+      "breakpoints": true
     }
   ]
 }
