@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { searchPlaces, planRoute, snapPath, reverseGeocode } from "@/lib/maps.functions";
+import { searchPlaces, planRoute, snapPath, reverseGeocode, resolveMapsLink } from "@/lib/maps.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ArrowUp, CornerUpLeft, CornerUpRight, Flag, Navigation, RotateCcw, RotateCw } from "lucide-react";
@@ -78,6 +78,7 @@ export function DeliveryMap() {
   const [clientName, setClientName] = useState("");
   const [savingClient, setSavingClient] = useState(false);
   const doReverse = useServerFn(reverseGeocode);
+  const doResolve = useServerFn(resolveMapsLink);
   const [open, setOpen] = useState(true);
 
   const doSearch = useServerFn(searchPlaces);
@@ -239,7 +240,12 @@ export function DeliveryMap() {
     if (query.trim().length < 3) return;
     setSearching(true);
     try {
-      const c = parseCoords(query);
+      let text = query.trim();
+      if (/^https:\/\/(maps\.app\.)?goo\.gl\//.test(text)) {
+        text = (await doResolve({ data: { url: text } })).url;
+      }
+      const c = parseCoords(text);
+      if (!c && text !== query.trim()) throw new Error("Não achei a localização nesse link.");
       if (c) {
         let addr = { address: "", street: "" };
         try { addr = await doReverse({ data: c }); } catch { /* keep coords */ }
