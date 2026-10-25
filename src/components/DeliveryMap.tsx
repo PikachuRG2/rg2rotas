@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { searchPlaces, planRoute, snapPath, reverseGeocode, resolveMapsLink } from "@/lib/maps.functions";
+import { parseOrder } from "@/lib/order.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ArrowUp, CornerUpLeft, CornerUpRight, Flag, Navigation, RotateCcw, RotateCw } from "lucide-react";
@@ -79,6 +80,10 @@ export function DeliveryMap() {
   const [savingClient, setSavingClient] = useState(false);
   const doReverse = useServerFn(reverseGeocode);
   const doResolve = useServerFn(resolveMapsLink);
+  const doParseOrder = useServerFn(parseOrder);
+  const [orderText, setOrderText] = useState("");
+  const [orderBusy, setOrderBusy] = useState(false);
+  const [orderNote, setOrderNote] = useState("");
   const [open, setOpen] = useState(true);
 
   const doSearch = useServerFn(searchPlaces);
@@ -254,6 +259,19 @@ export function DeliveryMap() {
       setResults(await doSearch({ data: { query, ...(me ? { bias: me } : {}) } }));
     } catch (err) { toast.error((err as Error).message); }
     setSearching(false);
+  }
+
+  async function readOrder() {
+    if (orderText.trim().length < 10) { toast.error("Cole o texto completo do pedido."); return; }
+    setOrderBusy(true);
+    try {
+      const parsed = await doParseOrder({ data: { text: orderText } });
+      setOrderNote(parsed.instructions.trim());
+      setQuery(parsed.address);
+      setResults(await doSearch({ data: { query: parsed.address, ...(me ? { bias: me } : {}) } }));
+      toast.success("Endereço encontrado! Toque no resultado para adicionar.");
+    } catch (err) { toast.error((err as Error).message); }
+    setOrderBusy(false);
   }
 
   function addStop(s: Stop) {
@@ -480,6 +498,24 @@ export function DeliveryMap() {
                 </div>
               ) : tab === "entregas" ? (
                 <div className="space-y-3">
+                  <details className="rounded-lg border border-border p-3">
+                    <summary className="cursor-pointer text-sm font-semibold">📋 Colar pedido (iFood, WhatsApp…)</summary>
+                    <textarea
+                      value={orderText}
+                      onChange={(e) => setOrderText(e.target.value)}
+                      placeholder="Cole aqui o texto completo do pedido…"
+                      rows={4}
+                      className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
+                    <Button onClick={readOrder} disabled={orderBusy} variant="secondary" className="mt-2 w-full">
+                      {orderBusy ? "Lendo pedido…" : "Ler pedido com IA"}
+                    </Button>
+                  </details>
+                  {orderNote && (
+                    <p className="rounded-lg border border-primary/50 bg-primary/10 px-3 py-2 text-sm">
+                      <b>Instruções de entrega:</b> {orderNote}
+                    </p>
+                  )}
                   <form onSubmit={search} className="flex gap-2">
                     <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Endereço da entrega…" className="h-11" />
                     <Button type="submit" variant="secondary" disabled={searching} className="h-11">{searching ? "…" : "Buscar"}</Button>
