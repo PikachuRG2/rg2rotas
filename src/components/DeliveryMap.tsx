@@ -261,6 +261,19 @@ export function DeliveryMap() {
     setSearching(false);
   }
 
+  async function readOrder() {
+    if (orderText.trim().length < 10) { toast.error("Cole o texto completo do pedido."); return; }
+    setOrderBusy(true);
+    try {
+      const parsed = await doParseOrder({ data: { text: orderText } });
+      setOrderNote(parsed.instructions.trim());
+      setQuery(parsed.address);
+      setResults(await doSearch({ data: { query: parsed.address, ...(me ? { bias: me } : {}) } }));
+      toast.success("Endereço encontrado! Toque no resultado para adicionar.");
+    } catch (err) { toast.error((err as Error).message); }
+    setOrderBusy(false);
+  }
+
   function addStop(s: Stop) {
     setStops((prev) => (prev.some((p) => p.id === s.id) ? prev : [...prev, s]));
     setResults([]); setQuery(""); setPlan(null);
