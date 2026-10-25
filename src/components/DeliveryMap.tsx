@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { searchPlaces, planRoute, snapPath, reverseGeocode, resolveMapsLink } from "@/lib/maps.functions";
+import { parseOrder } from "@/lib/order.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ArrowUp, CornerUpLeft, CornerUpRight, Flag, Navigation, RotateCcw, RotateCw } from "lucide-react";
@@ -79,6 +80,10 @@ export function DeliveryMap() {
   const [savingClient, setSavingClient] = useState(false);
   const doReverse = useServerFn(reverseGeocode);
   const doResolve = useServerFn(resolveMapsLink);
+  const doParseOrder = useServerFn(parseOrder);
+  const [orderText, setOrderText] = useState("");
+  const [orderBusy, setOrderBusy] = useState(false);
+  const [orderNote, setOrderNote] = useState("");
   const [open, setOpen] = useState(true);
 
   const doSearch = useServerFn(searchPlaces);
