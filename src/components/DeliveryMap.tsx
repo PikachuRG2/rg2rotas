@@ -498,6 +498,24 @@ export function DeliveryMap() {
                 </div>
               ) : tab === "entregas" ? (
                 <div className="space-y-3">
+                  <details className="rounded-lg border border-border p-3">
+                    <summary className="cursor-pointer text-sm font-semibold">📋 Colar pedido (iFood, WhatsApp…)</summary>
+                    <textarea
+                      value={orderText}
+                      onChange={(e) => setOrderText(e.target.value)}
+                      placeholder="Cole aqui o texto completo do pedido…"
+                      rows={4}
+                      className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
+                    <Button onClick={readOrder} disabled={orderBusy} variant="secondary" className="mt-2 w-full">
+                      {orderBusy ? "Lendo pedido…" : "Ler pedido com IA"}
+                    </Button>
+                  </details>
+                  {orderNote && (
+                    <p className="rounded-lg border border-primary/50 bg-primary/10 px-3 py-2 text-sm">
+                      <b>Instruções de entrega:</b> {orderNote}
+                    </p>
+                  )}
                   <form onSubmit={search} className="flex gap-2">
                     <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Endereço da entrega…" className="h-11" />
                     <Button type="submit" variant="secondary" disabled={searching} className="h-11">{searching ? "…" : "Buscar"}</Button>
