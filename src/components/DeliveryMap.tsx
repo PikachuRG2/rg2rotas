@@ -7,6 +7,7 @@ import { searchPlaces, planRoute, snapPath, reverseGeocode, resolveMapsLink } fr
 import { parseOrder } from "@/lib/order.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { InstallPrompt } from "@/components/InstallPrompt";
 import { ArrowUp, CornerUpLeft, CornerUpRight, Flag, Navigation, RotateCcw, RotateCw } from "lucide-react";
 import { advanceStep, distanceBetween, navigationDistance, type NavigationPlan } from "@/lib/navigation";
 import { parseCoords } from "@/lib/coords";
@@ -451,6 +452,7 @@ export function DeliveryMap() {
         </button>
 
         <div className="px-4 pb-4">
+          <InstallPrompt />
           {recording ? (
             <Button variant="destructive" disabled={busy} onClick={finish} className="h-14 w-full font-display text-xl font-bold uppercase">
               {busy ? "Alinhando às ruas…" : "Finalizar e salvar rota"}
