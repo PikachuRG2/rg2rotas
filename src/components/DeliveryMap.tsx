@@ -130,7 +130,7 @@ export function DeliveryMap() {
       const credit = document.createElement("div");
       credit.textContent = "© OpenStreetMap contributors";
       credit.style.cssText = "font-size:10px;padding:2px 6px;background:rgba(255,255,255,.8);color:#333";
-      map.current.controls[google.maps.ControlPosition.BOTTOM_RIGHT].push(credit);
+      map.current.controls[google.maps.ControlPosition.BOTTOM_RIGHT]?.push(credit);
       setReady(true);
     }).catch((e) => toast.error(e.message));
     return () => { cancelled = true; };
