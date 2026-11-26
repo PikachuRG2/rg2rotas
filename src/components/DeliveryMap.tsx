@@ -121,6 +121,16 @@ export function DeliveryMap() {
           { featureType: "transit", stylers: [{ visibility: "off" }] },
         ],
       });
+      // Fundo do mapa: OpenStreetMap (ruas e endereços mais completos).
+      map.current.mapTypes.set("osm", new google.maps.ImageMapType({
+        getTileUrl: (c, z) => `https://tile.openstreetmap.org/${z}/${c.x}/${c.y}.png`,
+        tileSize: new google.maps.Size(256, 256), maxZoom: 19, name: "OpenStreetMap",
+      }));
+      map.current.setMapTypeId("osm");
+      const credit = document.createElement("div");
+      credit.textContent = "© OpenStreetMap contributors";
+      credit.style.cssText = "font-size:10px;padding:2px 6px;background:rgba(255,255,255,.8);color:#333";
+      map.current.controls[google.maps.ControlPosition.BOTTOM_RIGHT].push(credit);
       setReady(true);
     }).catch((e) => toast.error(e.message));
     return () => { cancelled = true; };

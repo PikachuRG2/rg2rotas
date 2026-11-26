@@ -49,17 +49,44 @@ export const searchPlaces = createServerFn({ method: "POST" })
       },
       body: JSON.stringify(body),
     });
+    const osmP = searchOsm(data.query, data.bias).catch(() => []);
     const json = (await check(res)) as {
       places?: { id: string; displayName?: { text: string }; formattedAddress?: string; location: { latitude: number; longitude: number } }[];
     };
-    return (json.places ?? []).map((p) => ({
+    const osm = await osmP;
+    const google = (json.places ?? []).map((p) => ({
       id: p.id,
       name: p.displayName?.text ?? "",
       address: p.formattedAddress ?? "",
       lat: p.location.latitude,
       lng: p.location.longitude,
     }));
+    return [...osm, ...google].slice(0, 10);
   });
+
+// OpenStreetMap (Nominatim) address search — often has more complete street numbers in Brazil.
+async function searchOsm(q: string, bias?: LatLng) {
+  const u = new URL("https://nominatim.openstreetmap.org/search");
+  u.searchParams.set("q", q);
+  u.searchParams.set("format", "jsonv2");
+  u.searchParams.set("limit", "5");
+  u.searchParams.set("countrycodes", "br");
+  u.searchParams.set("accept-language", "pt-BR");
+  if (bias) {
+    const d = 0.3;
+    u.searchParams.set("viewbox", `${bias.lng - d},${bias.lat + d},${bias.lng + d},${bias.lat - d}`);
+  }
+  const res = await fetch(u, { headers: { "User-Agent": "RotaMoto/1.0 (rg2rotas.lovable.app)" } });
+  if (!res.ok) return [];
+  const list = (await res.json()) as { place_id: number; name?: string; display_name: string; lat: string; lon: string }[];
+  return list.map((p) => ({
+    id: `osm-${p.place_id}`,
+    name: p.name || p.display_name.split(",")[0] || "",
+    address: `${p.display_name} · OSM`,
+    lat: Number(p.lat),
+    lng: Number(p.lon),
+  }));
+}
 
 export const planRoute = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
