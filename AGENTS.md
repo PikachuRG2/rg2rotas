@@ -12,4 +12,5 @@
 - All Google Maps data calls (Places, Routes, Roads snap) go through authenticated server functions in src/lib/maps.functions.ts — keeps the server key private and usage bounded to signed-in users.
 - Recorded GPS trips are snapped to roads with the Roads API before saving to delivery_routes — the saved line must follow real streets.
 - Navigation uses Routes API step instructions and GPS endpoint proximity in src/lib/navigation.ts; keep the planned polyline visible during recording so delivery guidance is not erased on departure.
+- Rerouting checks confirmed GPS deviation against decoded route segments, throttles requests, and replans only unvisited stops from the latest position without resetting the recording — avoids GPS noise, duplicate calls, and backtracking to completed deliveries.
 - Home-screen install is manifest-only (public/manifest.webmanifest + icons under public/icons, head tags in src/routes/__root.tsx); add no service worker or offline cache unless the user explicitly asks for offline use, since workers can serve stale code to the preview.

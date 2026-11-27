@@ -24,3 +24,28 @@ export function advanceStep(steps: NavigationStep[], current: number, position: 
 export function navigationDistance(meters: number) {
   return meters < 1000 ? `${Math.round(meters / 10) * 10} m` : `${(meters / 1000).toFixed(1)} km`;
 }
+
+/** Distance to the actual route segments, not just its vertices. */
+export function distanceToPath(position: NavigationPoint, path: NavigationPoint[]) {
+  const scale = Math.PI * 6371000 / 180;
+  const longitudeScale = scale * Math.cos(position.lat * Math.PI / 180);
+  let nearest = Infinity;
+  for (let i = 1; i < path.length; i++) {
+    const a = path[i - 1], b = path[i];
+    if (!a || !b) continue;
+    const ax = (a.lng - position.lng) * longitudeScale, ay = (a.lat - position.lat) * scale;
+    const dx = (b.lng - a.lng) * longitudeScale, dy = (b.lat - a.lat) * scale;
+    const length = dx * dx + dy * dy;
+    const t = length ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / length)) : 0;
+    nearest = Math.min(nearest, Math.hypot(ax + t * dx, ay + t * dy));
+  }
+  return nearest;
+}
+
+export function offRouteFixes(position: NavigationPoint, path: NavigationPoint[], previous: number) {
+  return path.length >= 2 && distanceToPath(position, path) > 50 ? previous + 1 : 0;
+}
+
+export function shouldRecalculate(fixes: number, now: number, lastAttempt: number, pending: boolean) {
+  return !pending && fixes >= 3 && now - lastAttempt >= 15000;
+}

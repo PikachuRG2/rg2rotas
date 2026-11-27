@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InstallPrompt } from "@/components/InstallPrompt";
 import { ArrowUp, CornerUpLeft, CornerUpRight, Flag, Navigation, RotateCcw, RotateCw } from "lucide-react";
-import { advanceStep, distanceBetween, navigationDistance, type NavigationPlan } from "@/lib/navigation";
+import { advanceStep, distanceBetween, offRouteFixes, shouldRecalculate, navigationDistance, type NavigationPlan } from "@/lib/navigation";
 import { parseCoords } from "@/lib/coords";
 import { useKeepAwake } from "@/hooks/use-keep-awake";
 import { useHeading, requestCompassPermission } from "@/hooks/use-heading";
@@ -61,6 +61,14 @@ export function DeliveryMap() {
   const liveLine = useRef<google.maps.Polyline | null>(null);
   const snapLine = useRef<google.maps.Polyline | null>(null);
   const watchId = useRef<number | null>(null);
+  const plannedPath = useRef<LatLng[]>([]);
+  const remainingStops = useRef<Stop[]>([]);
+  const deviation = useRef(0);
+  const lastRecalculation = useRef(0);
+  const navigationSession = useRef(0);
+  const recalculationPending = useRef(false);
+  const [recalculating, setRecalculating] = useState(false);
+  const [mapDestination, setMapDestination] = useState(false);
 
   const [ready, setReady] = useState(false);
   const [me, setMe] = useState<LatLng | null>(null);
@@ -102,6 +110,39 @@ export function DeliveryMap() {
     setStepIndex((current) => advanceStep(plan.steps, current, me));
   }, [recording, me, plan]);
 
+  useEffect(() => {
+    if (!recording || !me || !plan) return;
+    const next = remainingStops.current[0];
+    if (next && distanceBetween(me, next) <= 25) remainingStops.current = remainingStops.current.slice(1);
+    if (!remainingStops.current.length) return;
+    deviation.current = offRouteFixes(me, plannedPath.current, deviation.current);
+    if (!shouldRecalculate(deviation.current, Date.now(), lastRecalculation.current, recalculationPending.current)) return;
+    lastRecalculation.current = Date.now();
+    recalculationPending.current = true;
+    setRecalculating(true);
+    const session = navigationSession.current;
+    const list = [...remainingStops.current];
+    void doPlan({ data: { origin: me, stops: list.map(({ lat, lng }) => ({ lat, lng })) } }).then((r) => {
+      if (session !== navigationSession.current) return;
+      remainingStops.current = r.order.map((i) => list[i]).filter((s): s is Stop => !!s);
+      drawPlan(r.polyline);
+      setPlan(r);
+      setStepIndex(0);
+      deviation.current = 0;
+    }).catch(() => {
+      if (session === navigationSession.current) toast.error("Não consegui recalcular. Vou tentar novamente.");
+    }).finally(() => {
+      recalculationPending.current = false;
+      setRecalculating(false);
+    });
+  }, [recording, me, plan, doPlan]);
+
+  // Release GPS on sign-out/unmount and invalidate in-flight route updates.
+  useEffect(() => () => {
+    navigationSession.current++;
+    if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
+  }, []);
+
   // Map init
   useEffect(() => {
     let cancelled = false;
@@ -135,6 +176,27 @@ export function DeliveryMap() {
     }).catch((e) => toast.error(e.message));
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (!ready || !map.current) return;
+    const listener = map.current.addListener("click", (event: google.maps.MapMouseEvent) => {
+      if (recording || busy || !event.latLng) return;
+      const pos = event.latLng.toJSON();
+      const id = `map-${pos.lat},${pos.lng}`;
+      const destination: Stop = { ...pos, id, name: "Local selecionado", address: `${pos.lat.toFixed(6)}, ${pos.lng.toFixed(6)}` };
+      setStops([destination]);
+      setMapDestination(true);
+      setPlan(null);
+      setResults([]);
+      setQuery("");
+      clearLines();
+      setOpen(false);
+      void doReverse({ data: pos }).then((address) => {
+        setStops((current) => current.map((stop) => stop.id === id ? { ...stop, name: address.street || stop.name, address: address.address || stop.address } : stop));
+      }).catch(() => { /* The selected coordinate remains usable without an address. */ });
+    });
+    return () => listener.remove();
+  }, [ready, recording, busy, doReverse]);
 
   // Locate me (one-shot) for search bias and centering
   useEffect(() => {
@@ -242,6 +304,7 @@ export function DeliveryMap() {
   }
 
   async function routeToClient(c: Client) {
+    setMapDestination(false);
     const s: Stop = { id: `client-${c.id}`, name: `👤 ${c.name}`, address: c.address || c.street, lat: c.lat, lng: c.lng };
     const list = stops.some((p) => p.id === s.id) ? stops : [...stops, s];
     setStops(list); setResults([]); setQuery(""); setTab("entregas");
@@ -286,6 +349,7 @@ export function DeliveryMap() {
   }
 
   function addStop(s: Stop) {
+    setMapDestination(false);
     setStops((prev) => (prev.some((p) => p.id === s.id) ? prev : [...prev, s]));
     setResults([]); setQuery(""); setPlan(null);
     clearLines();
@@ -294,25 +358,34 @@ export function DeliveryMap() {
 
   function clearLines() {
     planLine.current?.setMap(null); planLine.current = null;
+    plannedPath.current = [];
     snapLine.current?.setMap(null); snapLine.current = null;
   }
 
-  async function optimize(list: Stop[] = stops) {
-    if (!me) { toast.error("Preciso da sua localização para planejar."); return false; }
+  function drawPlan(polyline: string) {
+    const decoded = google.maps.geometry.encoding.decodePath(polyline);
+    clearLines();
+    plannedPath.current = decoded.map((p) => p.toJSON());
+    planLine.current = new google.maps.Polyline({
+      map: map.current, path: decoded,
+      strokeColor: COLORS.plan, strokeOpacity: 1, strokeWeight: 7, zIndex: 20,
+      icons: [{ icon: { path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW, fillColor: COLORS.plan, fillOpacity: 1, strokeColor: getComputedStyle(document.documentElement).getPropertyValue("--route-arrow").trim(), strokeOpacity: 1, strokeWeight: 2, scale: 3 }, offset: "35px", repeat: "90px" }],
+    });
+  }
+
+  async function optimize(list: Stop[] = stops, origin = me, overview = true) {
+    if (!origin) { toast.error("Preciso da sua localização para planejar."); return false; }
     if (!list.length || !ready || !map.current) return false;
     setBusy(true);
     try {
-      const r = await doPlan({ data: { origin: me, stops: list.map(({ lat, lng }) => ({ lat, lng })) } });
-      setStops(r.order.map((i) => list[i]).filter((x): x is Stop => !!x));
-      clearLines();
-      planLine.current = new google.maps.Polyline({
-        map: map.current, path: google.maps.geometry.encoding.decodePath(r.polyline),
-        strokeColor: COLORS.plan, strokeOpacity: 1, strokeWeight: 7, zIndex: 20,
-        icons: [{ icon: { path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW, fillColor: COLORS.plan, fillOpacity: 1, strokeColor: getComputedStyle(document.documentElement).getPropertyValue("--route-arrow").trim(), strokeOpacity: 1, strokeWeight: 2, scale: 3 }, offset: "35px", repeat: "90px" }],
-      });
+      const r = await doPlan({ data: { origin, stops: list.map(({ lat, lng }) => ({ lat, lng })) } });
+      const ordered = r.order.map((i) => list[i]).filter((x): x is Stop => !!x);
+      setStops(ordered);
+      remainingStops.current = ordered;
+      drawPlan(r.polyline);
       const b = new google.maps.LatLngBounds();
-      planLine.current.getPath().forEach((p) => b.extend(p));
-      map.current?.fitBounds(b, 60);
+      plannedPath.current.forEach((p) => b.extend(p));
+      if (overview) map.current?.fitBounds(b, 60);
       setPlan(r);
       setStepIndex(0);
       return true;
@@ -322,6 +395,10 @@ export function DeliveryMap() {
 
   function startWatch() {
     if (!navigator.geolocation) { toast.error("Seu aparelho não tem GPS disponível."); return; }
+    navigationSession.current++;
+    deviation.current = 0;
+    lastRecalculation.current = 0;
+    if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
     setRecording(true);
     void requestCompassPermission();
     map.current?.setZoom(18);
@@ -344,16 +421,30 @@ export function DeliveryMap() {
   }
 
   async function start() {
-    if (!ready) return;
-    if (stops.length && !plan && !(await optimize())) return;
+    if (!ready || busy || recording) return;
+    void requestCompassPermission();
+    if (!navigator.geolocation) { toast.error("Seu aparelho não tem GPS disponível."); return; }
+    setBusy(true);
+    let origin: LatLng;
+    try {
+      const p = await new Promise<GeolocationPosition>((ok, fail) => navigator.geolocation.getCurrentPosition(ok, fail, { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }));
+      if (p.coords.accuracy > 35) throw new Error("GPS impreciso. Aguarde em um local aberto e tente novamente.");
+      origin = { lat: p.coords.latitude, lng: p.coords.longitude };
+      setMe(origin);
+    } catch { toast.error("Não consegui sua localização precisa. Ative o GPS e tente novamente."); setBusy(false); return; }
+    if (stops.length && !(await optimize(stops, origin, false))) return;
+    setBusy(false);
     snapLine.current?.setMap(null); snapLine.current = null;
-    setRaw(me ? [me] : []);
+    setRaw([origin]);
     setStartedAt(new Date().toISOString());
     startWatch();
+    map.current?.panTo(origin);
     setOpen(false);
   }
 
   async function finish() {
+    navigationSession.current++;
+    setRecalculating(false);
     if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
     watchId.current = null;
     setRecording(false);
@@ -441,7 +532,7 @@ export function DeliveryMap() {
         <aside aria-label="Próxima direção" aria-live="polite" className="absolute inset-x-3 top-16 z-10 mx-auto flex max-w-xl items-center gap-3 rounded-lg border border-border bg-card/95 p-3 shadow-panel">
           <DirectionIcon className="h-9 w-9 shrink-0 text-primary" />
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-primary">{arrived ? "Destino alcançado" : distanceToTurn !== null ? `${nextStep ? "Em" : "Destino em"} aproximadamente ${navigationDistance(distanceToTurn)}` : "Saída"}</p>
+            <p className="text-sm font-semibold text-primary">{recalculating ? "Recalculando caminho…" : arrived ? "Destino alcançado" : distanceToTurn !== null ? `${nextStep ? "Em" : "Destino em"} aproximadamente ${navigationDistance(distanceToTurn)}` : "Saída"}</p>
             <p className="text-base font-bold leading-tight">{arrived ? "Fim do caminho planejado" : guidance?.instruction}</p>
           </div>
           <Button variant="secondary" size="icon" aria-label="Centralizar na minha localização" title="Minha localização" onClick={() => { if (me) { map.current?.panTo(me); map.current?.setZoom(18); } }}><Navigation /></Button>
@@ -463,6 +554,16 @@ export function DeliveryMap() {
 
         <div className="px-4 pb-4">
           <InstallPrompt />
+          {mapDestination && !recording && stops[0] && (
+            <div className="mb-3 flex items-center gap-3" aria-label="Destino selecionado">
+              <Flag className="h-5 w-5 shrink-0 text-primary" />
+              <div className="min-w-0 flex-1">
+                <p className="font-bold">{stops[0].name}</p>
+                <p className="break-words text-xs text-muted-foreground">{stops[0].address}</p>
+              </div>
+              <Button variant="ghost" size="icon" disabled={busy} aria-label="Cancelar destino" onClick={() => { setStops([]); setMapDestination(false); setPlan(null); clearLines(); setOpen(true); }}>✕</Button>
+            </div>
+          )}
           {recording ? (
             <Button variant="destructive" disabled={busy} onClick={finish} className="h-14 w-full font-display text-xl font-bold uppercase">
               {busy ? "Alinhando às ruas…" : "Finalizar e salvar rota"}
